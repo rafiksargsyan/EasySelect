@@ -15,12 +15,8 @@ public class MainActivity extends AppCompatActivity {
         setContentView(com.rsargsyan.easyselect.demo.R.layout.activity_main);
 
         EasySelectTextView easySelectTextView = findViewById(R.id.easySelecDemoTextView);
-        easySelectTextView.setOnSelectionCompletedCallback(new EasySelectTextView.OnSelectionCompletedCallback() {
-            @Override
-            public void onSelectionCompleted(String selectedString) {
-                Toast.makeText(MainActivity.this, selectedString,
-                        Toast.LENGTH_SHORT).show();
-            }
-        });
+        easySelectTextView.setOnSelectionCompletedCallback(selectedString ->
+                Toast.makeText(MainActivity.this,
+                        selectedString, Toast.LENGTH_SHORT).show());
     }
 }
