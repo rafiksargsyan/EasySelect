@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="easySelectTextViewStyle" format="reference" />
+    <declare-styleable name="EasySelectTextView">
+        <attr format="color|reference" name="selectedTextColor" />
+        <attr format="color|reference" name="selectedTextHighlightColor" />
+    </declare-styleable>
+</resources>
