@@ -17,6 +17,12 @@ import androidx.annotation.ColorInt;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextView {
     private @ColorInt int selectionTextColor;
     private @ColorInt int selectionTextHighlightColor;
@@ -25,6 +31,7 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
     private int effectiveSelectionStart;
     private int effectiveSelectionEnd;
     private OnSelectionCompletedCallback onSelectionCompletedCallback;
+    private SpanningStrategy spanningStrategy;
 
     private Spannable spannable;
 
@@ -83,6 +90,11 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
         onSelectionCompletedCallback = callback;
     }
 
+    public void setSpanningStrategy(SpanningStrategy strategy) {
+        spanningStrategy = strategy;
+        handleSpanningStrategyUpdated();
+    }
+
     @Override
     public void setText(CharSequence text, BufferType type) {
         super.setText(text, BufferType.SPANNABLE);
@@ -98,11 +110,27 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
         setOnTouchListener((v, event) -> false);
 
         spannable = (Spannable) getText();
+        if (spanningStrategy == null) {
+            spanningStrategy = new CharacterSpanningStrategy();
+        }
+        removeSpans(TouchableSpan.class);
         populateSpans();
     }
 
+    private void handleSpanningStrategyUpdated() {
+        removeSpans(TouchableSpan.class);
+        populateSpans();
+    }
+
+    private <T> void removeSpans(Class<T> type)  {
+        for (Object span : spannable.getSpans(0, spannable.length(), type)) {
+            spannable.removeSpan(span);
+        }
+    }
+
     private void populateSpans() {
-        for (int i = 0; i < spannable.length(); ++i) {
+        int[] spans = spanningStrategy.getSpans(spannable);
+        for (int i = 0; i < spans.length; i += 2) {
             TouchableSpan touchableSpan = new TouchableSpan() {
                 @Override
                 public boolean onTouch(View widget, MotionEvent m) {
@@ -140,7 +168,8 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
                 @Override
                 public void updateDrawState(TextPaint ds) { }
             };
-            spannable.setSpan(touchableSpan, i, i + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            spannable.setSpan(touchableSpan, spans[i], spans[i + 1],
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
     }
 
@@ -198,5 +227,44 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
 
     public interface OnSelectionCompletedCallback {
         void onSelectionCompleted(String selectedString);
+    }
+
+    public interface SpanningStrategy {
+        int[] getSpans(@NonNull Spannable spannable);
+    }
+
+    public static class CharacterSpanningStrategy implements SpanningStrategy {
+        @Override
+        public int[] getSpans(@NonNull Spannable spannable) {
+            int length = spannable.length();
+            int[] ret = new int[2 * length];
+            for (int i = 0, j = 0; i < length; ++i, j += 2) {
+                ret[j] = i;
+                ret[j + 1] = i + 1;
+            }
+            return ret;
+        }
+    }
+
+    public static class WordSpanningStrategy implements SpanningStrategy {
+        @Override
+        public int[] getSpans(@NonNull Spannable spannable) {
+            String spannableStr = ((CharSequence)spannable).toString();
+            List<Integer> retList = new ArrayList<>();
+            Pattern wordPattern = Pattern.compile("\\S+");
+            Matcher matcher = wordPattern.matcher(spannableStr);
+            while (matcher.find()) {
+                retList.add(matcher.start());
+                retList.add(matcher.end());
+            }
+            return toIntArray(retList);
+        }
+    }
+
+    private static int[] toIntArray(List<Integer> list) {
+        int[] ret = new int[list.size()];
+        for (int i = 0; i < ret.length; ++i)
+            ret[i] = list.get(i);
+        return ret;
     }
 }

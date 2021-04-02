@@ -18,5 +18,6 @@ public class MainActivity extends AppCompatActivity {
         easySelectTextView.setOnSelectionCompletedCallback(selectedString ->
                 Toast.makeText(MainActivity.this,
                         selectedString, Toast.LENGTH_SHORT).show());
+        easySelectTextView.setSpanningStrategy(new EasySelectTextView.WordSpanningStrategy());
     }
 }
