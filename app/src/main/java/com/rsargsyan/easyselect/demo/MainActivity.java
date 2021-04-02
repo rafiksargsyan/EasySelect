@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.widget.Toast;
 
 import com.rsargsyan.easyselect.EasySelectTextView;
+import com.rsargsyan.easyselect.EasySelectTextView.WordSpanningStrategy;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -18,6 +19,7 @@ public class MainActivity extends AppCompatActivity {
         easySelectTextView.setOnSelectionCompletedCallback(selectedString ->
                 Toast.makeText(MainActivity.this,
                         selectedString, Toast.LENGTH_SHORT).show());
-        easySelectTextView.setSpanningStrategy(new EasySelectTextView.WordSpanningStrategy());
+        easySelectTextView.setSpanningStrategy(WordSpanningStrategy.getInstance());
+        easySelectTextView.setText("Let's have some coffee");
     }
 }

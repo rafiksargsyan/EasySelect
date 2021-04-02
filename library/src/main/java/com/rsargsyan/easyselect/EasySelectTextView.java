@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Resources;
 import android.content.res.TypedArray;
+import android.os.Parcel;
 import android.text.Spannable;
 import android.text.Spanned;
 import android.text.TextPaint;
@@ -16,25 +17,32 @@ import android.view.View;
 import androidx.annotation.ColorInt;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.util.Pools.SimplePool;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextView {
-    private @ColorInt int selectionTextColor;
-    private @ColorInt int selectionTextHighlightColor;
+    private static final int MAX_POOL_SIZE = 1000;
+    private static final SpanningStrategy DEFAULT_SPANNING_STRATEGY =
+            CharacterSpanningStrategy.getInstance();
+
+    private @ColorInt
+    int selectionTextColor;
+    private @ColorInt
+    int selectionTextHighlightColor;
     private int initialSelectionStart;
     private int initialSelectionEnd;
     private int effectiveSelectionStart;
     private int effectiveSelectionEnd;
     private OnSelectionCompletedCallback onSelectionCompletedCallback;
     private SpanningStrategy spanningStrategy;
-
     private Spannable spannable;
-
+    private SimplePool<EasySelectTouchableSpan> touchableSpanObjectPool;
+    private SimplePool<EasySelectForegroundSpan> foregroundSpanObjectPool;
+    private SimplePool<EasySelectBackgroundSpan> backgroundSpanObjectPool;
 
     public EasySelectTextView(@NonNull Context context) {
         this(context, null);
@@ -48,7 +56,7 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
                               int defStyleAttr) {
         super(context, attrs, defStyleAttr);
 
-        init();
+        setup();
 
         final Resources.Theme theme = context.getTheme();
 
@@ -71,18 +79,24 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
     @SuppressWarnings("unused")
     public void setSelectionTextColor(@ColorInt int selectionTextColor) {
         this.selectionTextColor = selectionTextColor;
+        // reset, as it might contain obsolete entries
+        foregroundSpanObjectPool = null;
     }
 
     @SuppressWarnings("unused")
     public void setSelectionTextHighlightColor(@ColorInt int selectionTextHighlightColor) {
         this.selectionTextHighlightColor = selectionTextHighlightColor;
+        // reset, as it might contain obsolete entries
+        backgroundSpanObjectPool = null;
     }
 
-    public @ColorInt int getSelectionTextColor() {
+    public @ColorInt
+    int getSelectionTextColor() {
         return selectionTextColor;
     }
 
-    public @ColorInt int getSelectionTextHighlightColor() {
+    public @ColorInt
+    int getSelectionTextHighlightColor() {
         return selectionTextHighlightColor;
     }
 
@@ -98,77 +112,89 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
     @Override
     public void setText(CharSequence text, BufferType type) {
         super.setText(text, BufferType.SPANNABLE);
-        init();
+        reset();
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private void init() {
+    private void setup() {
         setFocusable(true);
         setFocusableInTouchMode(true);
         setTextIsSelectable(true);
         setMovementMethod(TouchableMovementMethod.getInstance());
         setOnTouchListener((v, event) -> false);
+    }
 
+    @SuppressLint("ClickableViewAccessibility")
+    private void reset() {
         spannable = (Spannable) getText();
-        if (spanningStrategy == null) {
-            spanningStrategy = new CharacterSpanningStrategy();
-        }
-        removeSpans(TouchableSpan.class);
+        removeTouchableSpans();
         populateSpans();
+    }
+
+    @NonNull
+    private SimplePool<EasySelectTouchableSpan> getTouchableSpanObjectPoolNullSafe() {
+        if (touchableSpanObjectPool == null) {
+            touchableSpanObjectPool = new SimplePool<>(MAX_POOL_SIZE);
+        }
+        return touchableSpanObjectPool;
+    }
+
+    @NonNull
+    private SimplePool<EasySelectForegroundSpan> getForegroundSpanObjectPoolNullSafe() {
+        if (foregroundSpanObjectPool == null) {
+            foregroundSpanObjectPool = new SimplePool<>(MAX_POOL_SIZE);
+        }
+        return foregroundSpanObjectPool;
+    }
+
+    @NonNull
+    private SimplePool<EasySelectBackgroundSpan> getBackgroundSpanObjectPoolNullSafe() {
+        if (backgroundSpanObjectPool == null) {
+            backgroundSpanObjectPool = new SimplePool<>(MAX_POOL_SIZE);
+        }
+        return backgroundSpanObjectPool;
+    }
+
+    @NonNull
+    private SpanningStrategy getSpanningStrategyNullSafe() {
+        if (spanningStrategy == null) {
+            spanningStrategy = DEFAULT_SPANNING_STRATEGY;
+        }
+        return spanningStrategy;
     }
 
     private void handleSpanningStrategyUpdated() {
-        removeSpans(TouchableSpan.class);
+        removeTouchableSpans();
         populateSpans();
     }
 
-    private <T> void removeSpans(Class<T> type)  {
-        for (Object span : spannable.getSpans(0, spannable.length(), type)) {
+    private void removeTouchableSpans() {
+        for (EasySelectTouchableSpan span : spannable.getSpans(0, spannable.length(),
+                EasySelectTouchableSpan.class)) {
             spannable.removeSpan(span);
+            getTouchableSpanObjectPoolNullSafe().release(span);
         }
     }
 
+    private EasySelectTouchableSpan obtainTouchableSpan() {
+        EasySelectTouchableSpan span = getTouchableSpanObjectPoolNullSafe().acquire();
+        return span == null ? new EasySelectTouchableSpan() : span;
+    }
+
+    private EasySelectForegroundSpan obtainForegroundSpan() {
+        EasySelectForegroundSpan span = getForegroundSpanObjectPoolNullSafe().acquire();
+        return span == null ? new EasySelectForegroundSpan(selectionTextColor) : span;
+    }
+
+    private EasySelectBackgroundSpan obtainBakcgroundSpan() {
+        EasySelectBackgroundSpan span = getBackgroundSpanObjectPoolNullSafe().acquire();
+        return span == null ? new EasySelectBackgroundSpan(selectionTextHighlightColor) : span;
+    }
+
     private void populateSpans() {
-        int[] spans = spanningStrategy.getSpans(spannable);
+        int[] spans = getSpanningStrategyNullSafe().getSpans(spannable);
         for (int i = 0; i < spans.length; i += 2) {
-            TouchableSpan touchableSpan = new TouchableSpan() {
-                @Override
-                public boolean onTouch(View widget, MotionEvent m) {
-                    int spanStart = spannable.getSpanStart(this);
-                    int spanEnd = spannable.getSpanEnd(this);
-
-                    if (m.getAction() == MotionEvent.ACTION_DOWN) {
-                        initialSelectionStart = spanStart;
-                        initialSelectionEnd = spanEnd;
-                        effectiveSelectionStart = spanStart;
-                        effectiveSelectionEnd = spanEnd;
-                    }
-
-                    int oldEffectiveSelectionStart = effectiveSelectionStart;
-                    int oldEffectiveSelectionEnd = effectiveSelectionEnd;
-                    effectiveSelectionStart = (Math.min(spanStart, initialSelectionStart));
-                    effectiveSelectionEnd = (Math.max(spanEnd, initialSelectionEnd));
-
-                    decorateSelection(oldEffectiveSelectionStart, oldEffectiveSelectionEnd,
-                            effectiveSelectionStart, effectiveSelectionEnd);
-
-                    if (m.getAction() == MotionEvent.ACTION_UP) {
-                        if (onSelectionCompletedCallback != null) {
-                            String selectedText =
-                                    spannable.subSequence(effectiveSelectionStart,
-                                            effectiveSelectionEnd).toString();
-                            onSelectionCompletedCallback.onSelectionCompleted(selectedText);
-                        }
-                        removeDecoration(0, spannable.length());
-                    }
-
-                    return true;
-                }
-
-                @Override
-                public void updateDrawState(TextPaint ds) { }
-            };
-            spannable.setSpan(touchableSpan, spans[i], spans[i + 1],
+            spannable.setSpan(obtainTouchableSpan(), spans[i], spans[i + 1],
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
     }
@@ -197,8 +223,14 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
         Object[] selectedSpans =
                 spannable.getSpans(selectionStart, selectionEnd, Object.class);
         for (Object span : selectedSpans) {
-            if (span instanceof ForegroundColorSpan || span instanceof BackgroundColorSpan) {
+            if (span instanceof EasySelectForegroundSpan ||
+                    span instanceof EasySelectBackgroundSpan) {
                 spannable.removeSpan(span);
+                if (span instanceof EasySelectForegroundSpan) {
+                    getForegroundSpanObjectPoolNullSafe().release((EasySelectForegroundSpan) span);
+                } else {
+                    getBackgroundSpanObjectPoolNullSafe().release((EasySelectBackgroundSpan) span);
+                }
             }
         }
     }
@@ -218,11 +250,11 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
     }
 
     private void decorateForeground(@NonNull Object span) {
-        decorate(span, new ForegroundColorSpan(selectionTextColor));
+        decorate(span, obtainForegroundSpan());
     }
 
     private void decorateBackground(@NonNull Object span) {
-        decorate(span, new BackgroundColorSpan(selectionTextHighlightColor));
+        decorate(span, obtainBakcgroundSpan());
     }
 
     public interface OnSelectionCompletedCallback {
@@ -234,6 +266,8 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
     }
 
     public static class CharacterSpanningStrategy implements SpanningStrategy {
+        private CharacterSpanningStrategy() {}
+
         @Override
         public int[] getSpans(@NonNull Spannable spannable) {
             int length = spannable.length();
@@ -244,27 +278,105 @@ public class EasySelectTextView extends androidx.appcompat.widget.AppCompatTextV
             }
             return ret;
         }
+
+        private static CharacterSpanningStrategy INSTANCE;
+        public static CharacterSpanningStrategy getInstance() {
+            if (INSTANCE == null) {
+                INSTANCE = new CharacterSpanningStrategy();
+            }
+            return INSTANCE;
+        }
     }
 
     public static class WordSpanningStrategy implements SpanningStrategy {
+        private WordSpanningStrategy() {}
+
         @Override
         public int[] getSpans(@NonNull Spannable spannable) {
-            String spannableStr = ((CharSequence)spannable).toString();
             List<Integer> retList = new ArrayList<>();
             Pattern wordPattern = Pattern.compile("\\S+");
-            Matcher matcher = wordPattern.matcher(spannableStr);
+            Matcher matcher = wordPattern.matcher((CharSequence) spannable);
             while (matcher.find()) {
                 retList.add(matcher.start());
                 retList.add(matcher.end());
             }
             return toIntArray(retList);
         }
+
+        private static WordSpanningStrategy INSTANCE;
+        @SuppressWarnings("unused")
+        public static WordSpanningStrategy getInstance() {
+            if (INSTANCE == null) {
+                INSTANCE = new WordSpanningStrategy();
+            }
+            return INSTANCE;
+        }
     }
 
-    private static int[] toIntArray(List<Integer> list) {
+    private static int[] toIntArray(@NonNull List<Integer> list) {
         int[] ret = new int[list.size()];
         for (int i = 0; i < ret.length; ++i)
             ret[i] = list.get(i);
         return ret;
+    }
+
+    private class EasySelectTouchableSpan extends TouchableSpan {
+        @Override
+        public boolean onTouch(View widget, MotionEvent m) {
+            int spanStart = spannable.getSpanStart(this);
+            int spanEnd = spannable.getSpanEnd(this);
+
+            if (m.getAction() == MotionEvent.ACTION_DOWN) {
+                initialSelectionStart = spanStart;
+                initialSelectionEnd = spanEnd;
+                effectiveSelectionStart = spanStart;
+                effectiveSelectionEnd = spanEnd;
+            }
+
+            int oldEffectiveSelectionStart = effectiveSelectionStart;
+            int oldEffectiveSelectionEnd = effectiveSelectionEnd;
+            effectiveSelectionStart = (Math.min(spanStart, initialSelectionStart));
+            effectiveSelectionEnd = (Math.max(spanEnd, initialSelectionEnd));
+
+            decorateSelection(oldEffectiveSelectionStart, oldEffectiveSelectionEnd,
+                    effectiveSelectionStart, effectiveSelectionEnd);
+
+            if (m.getAction() == MotionEvent.ACTION_UP) {
+                if (onSelectionCompletedCallback != null) {
+                    String selectedText =
+                            spannable.subSequence(effectiveSelectionStart,
+                                    effectiveSelectionEnd).toString();
+                    onSelectionCompletedCallback.onSelectionCompleted(selectedText);
+                }
+                removeDecoration(0, spannable.length());
+            }
+
+            return true;
+        }
+
+        @Override
+        public void updateDrawState(TextPaint ds) { }
+    }
+
+    private static class EasySelectForegroundSpan extends ForegroundColorSpan {
+        public EasySelectForegroundSpan(int color) {
+            super(color);
+        }
+
+        @SuppressWarnings("unused")
+        public EasySelectForegroundSpan(@NonNull Parcel src) {
+            super(src);
+        }
+    }
+
+    private static class EasySelectBackgroundSpan extends BackgroundColorSpan {
+        public EasySelectBackgroundSpan(int color) {
+            super(color);
+        }
+
+        @SuppressWarnings("unused")
+        public EasySelectBackgroundSpan(@NonNull Parcel src) {
+            super(src);
+        }
     }
 }
