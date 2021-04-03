@@ -6,6 +6,24 @@ Just swipe over the text to select it and do whatever you want :)
 
 ## Usage
 
+Add jitpack in your root build.gradle at the end of repositories:
+
+```gradle
+allprojects {
+    repositories {
+        ...
+	maven { url 'https://jitpack.io' }
+    }
+}
+```
+Add dependency to the module where you want to use it:
+
+```gradle
+dependencies {
+    implementation 'com.github.rafiksargsyan:EasySelect:v1.1'
+}
+```
+
 ```xml
 .......
 
